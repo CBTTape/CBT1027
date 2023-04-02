@@ -1,0 +1,37 @@
+/* REXX */
+myresult = axrcmd('d iplinfo',var.,5)
+gadcon = 'firstline'
+x = axrwto('d iplinfo')
+x = axrmlwto(substr(var.1,1,50),'gadcon','c')
+do i = 2 to var.0
+x = axrmlwto(substr(var.i,1,50),'gadcon','d')
+end
+x = axrmlwto(,'gadcon','e')
+/* parmlib */
+myresult = axrcmd('d parmlib',var.,5)
+gadcon = 'firstline'
+x = axrwto('d parmlib')
+x = axrmlwto(substr(var.1,1,50),'gadcon','c')
+do i = 2 to var.0
+x = axrmlwto(substr(var.i,1,50),'gadcon','d')
+end
+x = axrmlwto(,'gadcon','e')
+/* opdata */
+myresult = axrcmd('d opdata',var.,5)
+gadcon = 'firstline'
+x = axrwto('d opdata')
+x = axrmlwto(substr(var.1,1,50),'gadcon','c')
+do i = 2 to var.0
+x = axrmlwto(substr(var.i,1,50),'gadcon','d')
+end
+x = axrmlwto(,'gadcon','e')
+/* cpudata */
+myresult = axrcmd('d m=cpu',var.,5)
+gadcon = 'firstline'
+x = axrwto('d m=cpu')
+x = axrmlwto(substr(var.1,1,50),'gadcon','c')
+do i = 2 to var.0
+x = axrmlwto(substr(var.i,1,50),'gadcon','d')
+end
+x = axrmlwto(,'gadcon','e')
+exit 0

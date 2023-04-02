@@ -1,0 +1,15 @@
+/* REXX */
+parse arg stcname junk .
+if length(stcname) < 1 then do
+  say 'missing stc name'
+  return
+end
+HostName = MVSVAR('SYSNAME')
+notfound = strip(stcname 'NOT FOUND',b,' ')
+actstc = axrcmd('d a,'stcname'',act.,5)
+results = strip(act.4,b,' ')
+if results <> notfound Then do
+  actstc = axrcmd('f mvtom,cmd stop object('stcname'.'HostName') RESNEXTIPL',act.,5)
+end
+ else say stcname 'already down'
+return

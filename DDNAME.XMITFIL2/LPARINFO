@@ -1,0 +1,25 @@
+/* REXX */
+myresult = axrcmd('d iplinfo',var.,5)
+say substr(var.1,1,50)
+do i = 2 to var.0
+  say substr(var.i,1,50)
+end
+/* parmlib */
+myresult = axrcmd('d parmlib',var.,5)
+say substr(var.1,1,50)
+do i = 2 to var.0
+  say substr(var.i,1,50)
+end
+/* opdata */
+myresult = axrcmd('d opdata',var.,5)
+say substr(var.1,1,50)
+do i = 2 to var.0
+  say substr(var.i,1,50)
+end
+/* cpudata */
+myresult = axrcmd('d m=cpu',var.,5)
+say substr(var.1,1,50)
+do i = 2 to var.0
+  say substr(var.i,1,50)
+end
+exit 0

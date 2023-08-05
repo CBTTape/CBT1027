@@ -1,0 +1,45 @@
+/* rexx */
+/* Check to see if a port is open */
+trace e
+parse arg server port .
+/* server = prodl1 */
+/* port = 23   */
+if length(server) = 0 then do
+  say 'retry using correct syntax = ckport server portnum'
+  say '  where server is the DNS name or IP address of the server'
+  say '  and portnum is the port or socket number'
+  exit 8
+end
+if datatype(port,N) <> 1 then do
+  say 'port number either missing or not numeric'
+  say 'retry using correct syntax = ckport server portnum'
+  say '  where server is the DNS name or IP address of the server'
+  say '  and portnum is the port or socket number'
+  exit 8
+end
+src = socket("INITIALIZE","CKSET01");
+if perror(src,"INITIALIZE") = 0 then do
+   src = socket("SOCKET","AF_INET","STREAM");
+   if perror(src,"SOCKET") = 0 then do
+      l_socketid = WORD(src,2);
+      L_RMTNAME = "AF_INET " port server ""
+      WTOResult=AXRWTO('Checking Port 'port' on 'server'')
+      src = socket("CONNECT",l_socketid,l_RMTname);
+      if perror(src,"CONNECT") = 0  then do
+         src = socket("GETSOCKNAME",l_socketid);
+         if perror(src,"GETSOCKNAME") = 0 then do
+            l_LOCname = SUBWORD(src,4);
+            WTOResult=AXRWTO('Port 'port' is ready on: 'L_LOCNAME'')
+         end; /* GETSOCKNAME*/
+      end; /* CONNECT */
+   end; /* SOCKET */
+   src = socket("CLOSE",l_socketid);
+   src = perror(src,"CLOSE");
+end; /* INITIALIZE */
+src = socket("TERMINATE","CKSET01");
+src = perror(src,"TERMINATE");
+exit 0;
+exit 0;
+perror: if word(arg(1),1) = 0 then return 0; else
+      Say arg(2) "Error : "arg(1);
+      return -1;

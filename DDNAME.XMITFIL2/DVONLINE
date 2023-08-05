@@ -1,0 +1,32 @@
+/* Rexx bring spare volumes online */
+trace err
+
+dsn = 'SYS0.DASD.SPARE.VOLSER.UCB'
+buildit:
+newstack
+if dsn = '?' then do
+  say 'dsname required'
+  return 16
+end
+exist = listdsi("'"dsn"'")
+if length(sysdsname) = 0 then do
+  say 'dsd010 - data set error for 'dsn
+  say 'dsd011 - reason code 'sysreason
+  return 16
+end
+allocdsn = "ALLOC DD(DSDIN) DSN('"dsn"')",
+  "SHR RELEASE"
+Call BPXWDYN(allocdsn)
+cnt =
+"execio * diskr dsdin (stem line. finis"
+do until cnt = line.0
+  cnt = cnt + 1
+  volser.cnt = substr(line.cnt,2,6)
+  ucb.cnt = substr(line.cnt,11,4)
+/*  say volser.cnt */
+/*  say ucb.cnt ucb */
+  mycmd  = 'V 'ucb.cnt',ONLINE'
+/* say mycmd */
+  result =  AXRCMD(mycmd,dvonline.,10);
+end
+return

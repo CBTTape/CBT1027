@@ -1,0 +1,10 @@
+/* REXX */
+parse arg stcname junk .
+/*trace i */
+if length(stcname) < 1 then do
+  say 'missing stc name'
+  return
+end
+ObjectName = MVSVAR('SYSNAME')
+  actstc = axrcmd('f mvtom,cmd reset object('stcname'.'ObjectName') resetopt(runstat)',act.,5)
+return

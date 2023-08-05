@@ -1,0 +1,75 @@
+/* get system symbol values */
+symbols:
+/* interpret system symbols */
+dsymbol = axrcmd('d symbols',results.,5)
+SYSALVL  =  ''
+SYSCLONE =  ''
+SYSNAME  =  ''
+SYSOSLVL =  ''
+SYSPLEX  =  ''
+SYSR1    =  ''
+CPAC1    =  ''
+CPUNAME  =  ''
+DLIB1    =  ''
+ENVIRMENT=  ''
+HRDWNAME =  ''
+LPAR     =  ''
+LPARNAME =  ''
+OEMV1    =  ''
+OSLEVEL  =  ''
+SMFID    =  ''
+SYSR2    =  ''
+SYSV1    =  ''
+VMUSERID =  ''
+do i = 2 to results.0
+  dsymbol = results.i
+  /* &xxx.          = "x" */
+  parse var dsymbol symbol '=' value junk
+  symbol = strip(symbol,B,' ')
+  symbol = strip(symbol,B,'&')
+  symbol = strip(symbol,B,'.')
+  value = strip(value,B,'"')
+  select
+    when symbol = "SYSALVL"  THEN
+       SYSALVL  = value
+    when symbol = "SYSCLONE" THEN
+       SYSCLONE = value
+    when symbol = "SYSNAME"  THEN
+       SYSNAME  = value
+    when symbol = "SYSOSLVL" THEN
+       SYSOSLVL = value
+    when symbol = "SYSPLEX"  THEN
+       SYSPLEX  = value
+    when symbol = "SYSR1"    THEN
+       SYSR1    = value
+    when symbol = "CPAC1"    THEN
+       CPAC1    = value
+    when symbol = "CPUNAME"  THEN
+       CPUNAME  = value
+    when symbol = "DLIB1"    THEN
+       DLIB1    = value
+    when symbol = "ENVIRMENT" THEN
+       ENVIRMENT  = value
+    when symbol = "HRDWNAME" THEN
+       HRDWNAME   = value
+    when symbol = "LPAR"     THEN
+       LPAR      = value
+    when symbol = "LPARNAME" THEN
+       LPARNAME  = value
+    when symbol = "OEMV1"    THEN
+       OEMV1    = value
+    when symbol = "OSLEVEL"  THEN
+       OSLEVEL  = value
+    when symbol = "SMFID"    THEN
+       SMFID    = value
+    when symbol = "SYSR2"    THEN
+       SYSR2    = value
+    when symbol = "SYSV1"    THEN
+       SYSV1    = value
+    when symbol = "VMUSERID" THEN
+       VMUSERID = value
+    otherwise nop
+    end
+/* say  symbol 'is' value */
+end
+return

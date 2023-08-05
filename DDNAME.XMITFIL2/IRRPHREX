@@ -1,0 +1,653 @@
+/*rexx                                                               */
+/*********************************************************************/
+/* PROPRIETARY STATEMENT                                             */
+/*                                                                   */
+/* Licensed Materials - Property of IBM                              */
+/* 5650-ZOS                                                          */
+/* Copyright IBM Corp. 2007, 2015                                    */
+/*                                                                   */
+/* Status = HRF77A0                                                  */
+/*                                                                   */
+/* END_OF_PROPRIETARY_STATEMENT                                      */
+/*-------------------------------------------------------------------*/
+/*                                                                   */
+/* *01* EXTERNAL CLASSIFICATION: OTHER                               */
+/* *01* END OF EXTERNAL CLASSIFICATION:                              */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*                                                                   */
+/* IRRPHREX: A sample REXX exec which can be used to check the       */
+/*           quality of a new password phrase. This sample works in  */
+/*           concert with a sample new-password-phrase-exit          */
+/*           ICHPWX11, shipped in SYS1.SAMPLIB in the RACEXITS       */
+/*           member.                                                 */
+/*                                                                   */
+/* Function:                                                         */
+/* --------                                                          */
+/*   IRRPHREX gets control from ICHPWX11 using System REXX. It       */
+/*   receives every parameter that ICHPWX11 itself receives from     */
+/*   RACF, as well as a few others.                                  */
+/*                                                                   */
+/* Input arguments:                                                  */
+/* ---------------                                                   */
+/*   See the RACF System Programmer's Guide for detail on the        */
+/*   parameters passed to ICHPWX11.                                  */
+/*                                                                   */
+/*   Not all parameters are meaningful for all functions (i.e. all   */
+/*   values of ExitCaller). When a string value is not applicable,   */
+/*   its length is passed in as 0. All address fields could have     */
+/*   a value of 0.                                                   */
+/*                                                                   */
+/*  ExitCaller - Code for PASSWORD, ADDUSER, ALTUSER, or RACINIT.    */
+/*  CPPLaddr   - Address of TSO Command Processor Parameter List     */
+/*  CmdImage   - Command image from the CPPL, truncated at 512       */
+/*               characters.                                         */
+/*  newPhrase  - The new value of the password phrase.               */
+/*  userID     - The user ID whose password phrase is being changed. */
+/*  workAddr   - The address of the RACINIT exit work area.          */
+/*  oldPhrase  - The current (old) value of the password phrase.     */
+/*  chgDate    - The date of last phrase change in string form.      */
+/*               This is in the format yyyyddd. If the phrase is     */
+/*               expired, PASSWORD will set the value to '1900000',  */
+/*               but RACINIT will set the value to '0000000'.        */
+/*               Neither ADDUSER nor ALTUSER pass in this argument.  */
+/*  ACEEaddr   - The address of the ACEE of the command issuer (for  */
+/*               ADDUSER/ALTUSER/PASWORD) or of the user being       */
+/*               verified (RACINIT). For RACINIT, the ACEE is not    */
+/*               initialized.                                        */
+/*  userName   - The name of the user whose password phrase is being */
+/*               changed. Not available for ADDUSER. See the user    */
+/*               name check below for additional considerations.     */
+/*  instData   - The installation data of the user whose password    */
+/*               phrase is being changed. Not available for ADDUSER. */
+/*               Note that this is the data which currently exists   */
+/*               in the target user's ACEE or USER profile. If we    */
+/*               are being called for an ADDUSER or ALTUSER command  */
+/*               which specifies the DATA operand in addition to     */
+/*               PHRASE, and you wish to use the new value, you can  */
+/*               parse it from the supplied command image in the     */
+/*               CmdImage parameter.                                 */
+/*  groupName  - The connect group, if specified, from RACINIT only. */
+/*  instAddr   - The address, if supplied on the INSTLN= keyword,    */
+/*               from RACINIT only.                                  */
+/*                                                                   */
+/*   A note on input addresses: At the time of this writing, the     */
+/*     REXX STORAGE function does not support ALETs, and so input    */
+/*     addresses may not be very useful (unless you call an          */
+/*     assembler routine which can do something with them. In this   */
+/*     case, you may as well alter ICHPWX11). The addresses are      */
+/*     being passed to IRRPHREX so that, should the STORAGE function */
+/*     become more useful in the future, the ICHPWX11 changes will   */
+/*     be minimal. Meanwhile, if you want some specific piece of     */
+/*     data located by the address, then you'll need to update the   */
+/*     sample ICHPWX11 to pass in the data as a character argument.  */
+/*                                                                   */
+/*                                                                   */
+/* Output arguments:                                                 */
+/* ----------------                                                  */
+/*   RexxRc -     The return code from this exec. It will be set as  */
+/*                ICHPWX11's return code, so it must adhere to the   */
+/*                specifications of the exit. Namely:                */
+/*                                                                   */
+/*                0 - New value is acceptable                        */
+/*                4 - New value is not accepatble                    */
+/*                                                                   */
+/*   RexxReason - The reason code from this exec. This is not used   */
+/*                by the ICHPWX11 sample shipped with RACF. It is    */
+/*                used by this exec to indicate which rule rejected  */
+/*                a new password phrase value. ICHPWX11 could be     */
+/*                modified to display a specific message to the user.*/
+/*                                                                   */
+/*                When RexxRc=4, RexxReason can have one of the      */
+/*                following values:                                  */
+/*                                                                   */
+/*                1  - Minimum length violation                      */
+/*                2  - Maximum length violation                      */
+/*                3  - Phrase contains disallowed characters         */
+/*                4  - Phrase contains leading blanks                */
+/*                5  - Phrase contains trailing blanks               */
+/*                6  - Phrase contains part of user's name           */
+/*                7  - Phrase is only trivially different from       */
+/*                     previous value                                */
+/*                8  - Phrase does not contain enough character      */
+/*                     differences from previous value               */
+/*                9  - Phrase does not contain enough unique word    */
+/*                     differences from previous value               */
+/*                10 - Phrase contains a word from the restricted    */
+/*                     dictionary                                    */
+/*                                                                   */
+/* Limitations and restrictions:                                     */
+/* ----------------------------                                      */
+/*                                                                   */
+/*   - System REXX requires that this exec live in the REXXLIB       */
+/*     concatenation (Prior to REXXLIB support, the exec had to      */
+/*     reside in SYS1.SAXREXEC).                                     */
+/*                                                                   */
+/*   - ICHPWX11 is coded to call an exec named IRRPHREX, so the name */
+/*     cannot be changed without a corresponding change to ICHPWX11. */
+/*                                                                   */
+/*   - ICHPWX11 is coded to give this exec 2 seconds to complete.    */
+/*     Otherwise, the phrase change will be rejected. ICHPWX11 can   */
+/*     be modified to set a different value, if desired.             */
+/*                                                                   */
+/* Configuration variables:                                          */
+/* -----------------------                                           */
+/*                                                                   */
+/*   Following are some configurable values used in the checking     */
+/*   performed by this exec. The default settings of these variables */
+/*   result in no functional difference in the way RACF checks       */
+/*   the vailidity of a new password phrase.                         */
+/*                                                                   */
+/*   The types of checks implemented herein should not be construed  */
+/*   as enforcing "best practice" quality checks, but serve to       */
+/*   demonstrate a number of quality checks which some customers     */
+/*   may find useful.                                                */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Debug mode. If 'on', the input arguments and final return       */
+/*   and reason code are dumped to the console using WTO.            */
+/*                                                                   */
+/*   Note that System REXX provides additional functions from the    */
+/*   AXREXX macro which could be useful for debugging. ICHPWX11      */
+/*   would need to be modified to exploit these.                     */
+/*                                                                   */
+/* debug = 'off'                                                     */
+   debug = 'on'
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Minimum length. This is set to whatever value RACF will         */
+/*   enforce, which is 14 when a legacy password encryption          */
+/*   algorithm is active, and 9 when KDFAES is active. We will       */
+/*   determine the active algorithm from the contents of the         */
+/*   RCVT and set the default minimum length accordingly.            */
+/*                                                                   */
+/*   This check may be disabled by deleting or commenting out the    */
+/*   following code.                                                 */
+/*                                                                   */
+cvt_addr  = c2d(Storage(10,4))                 /*  CVT address       */
+rcvt_addr = c2d(Storage(d2x(cvt_addr + 992),4))/* RCVT address       */
+pwalg     = Storage(d2x(rcvt_addr+635),1)      /* Get RCVTPALG field */
+pwalg     = c2d(pwalg)                         /* Convert to decimal */
+
+If pwalg = 0 Then                 /* If legacy algorithm in effect   */
+  Phr_minlen = 12                 /* Minimum length was 14           */
+Else                              /* But when KDFAES is active       */
+  Phr_minlen = 9                  /* Minimum length is 9             */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Maximum length. This is set to RACF's default of 100.           */
+/*                                                                   */
+/*   This check may be disabled by deleting or commenting out the    */
+/*   following line.                                                 */
+/*                                                                   */
+Phr_maxlen = 45                   /* Maximum password phrase length  */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Allowable characters.                                           */
+/*                                                                   */
+/*   In theory, any character is allowable in a password phrase.     */
+/*   However, some characters will cause trouble in some environ-    */
+/*   ments (e.g. the semi-colon on the TSO command line, or the      */
+/*   forward slash on z/VM).                                         */
+/*                                                                   */
+/*   Also, if you are synchronizing passwords/phrases across a       */
+/*   heterogeneous environment, you probably want to restrict the    */
+/*   allowable characters to the least common denominator accepted   */
+/*   by all of the systems.                                          */
+/*                                                                   */
+/*   Enable this check by uncommenting and modifying the following   */
+/*   lines as appropriate.                                           */
+/*                                                                   */
+/*numbers = '0123456789'                                             */
+/*letters = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'   */
+/*special = '$@# '                                                   */
+/*Phr_allowed_chars = numbers||letters||special                      */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Leading and trailing blanks allowed or not. These can cause     */
+/*   problems in some environments, like z/VM. So, if you are        */
+/*   sharing a RACF database between z/OS and z/VM, you might want   */
+/*   to change these to 'no'.                                        */
+/*                                                                   */
+/*   This check may be enabled setting the value(s) to 'no'.         */
+/*                                                                   */
+Phr_leading_blanks = 'yes'
+Phr_trailing_blanks = 'yes'
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   User name allowed or not. This checks if any word in the user   */
+/*   name is contained anywhere in the new phrase. It does not have  */
+/*   to be a separate word; it could be a substring of another word, */
+/*   and would still be detected. This check is case insensitive.    */
+/*                                                                   */
+/*   The NAME operand of the ADDUSER or ALTUSER command is used to   */
+/*   specify the user name. Note that this exec receives the user    */
+/*   name as it currently exists in the RACF database. If we are     */
+/*   being called for an ADDUSER or ALTUSER command in which the     */
+/*   NAME operand has been specified in addition to PHRASE, this     */
+/*   new value is *not* what is passed to us in the userName         */
+/*   parameter. If you wish to perform processing for this new       */
+/*   value of NAME, you can add logic to parse it from the input     */
+/*   command image, contained in the CmdImage variable.              */
+/*                                                                   */
+/*   A minimum 'word' length is also defined, and defaults to 3.     */
+/*   This is so that, for example,  a name such as "BRUCE R WELLS"   */
+/*   doesn't cause a rejection for any instance of "R" in the new    */
+/*   phrase.                                                         */
+/*                                                                   */
+/*   This check may be enabled by setting the value to 'no'.         */
+/*                                                                   */
+Phr_name_allowed = 'yes'
+Phr_name_minlen  = 3
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Triviality checks with respect to old password phrase. This     */
+/*   checks that the new phrase does not differ from the old         */
+/*   phrase only by spaces or by case. It also checks that the       */
+/*   shorter of the two is not simply a substring of the longer one. */
+/*                                                                   */
+/*   These checks are only performed for PASSWORD and RACINIT, since */
+/*   ADDUSER and ALTUSER do not provide the old password phrase.     */
+/*                                                                   */
+/*   This check may be enabled by setting the value to 'yes'.        */
+/*                                                                   */
+Phr_triviality = 'no'
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Minimum unique characters by position. This check prevents      */
+/*   a new phrase which differs by only a few character positions    */
+/*   from the old phrase. For example, changing the phrase from      */
+/*     'The name of my cat is Ben'                                   */
+/*   to                                                              */
+/*     'The name of my rat is Ben'                                   */
+/*                                                                   */
+/*   An associated variable controls whether the phrases are first   */
+/*   normalized (upper-cased and spaces removed) before the check is */
+/*   performed. The check is performed for the length of the smaller */
+/*   string, so even if the new phrase is many characters longer     */
+/*   than the old, this rule could still fail the change if there    */
+/*   aren't enough unique characters in the beginning part.          */
+/*                                                                   */
+/*   This check is only performed for PASSWORD and RACINIT, since    */
+/*   ADDUSER and ALTUSER do not provide the old password phrase.     */
+/*                                                                   */
+/*   This check may be enabled by changing the setting to a non-zero */
+/*   value.                                                          */
+/*                                                                   */
+Phr_min_unique = 0
+Phr_min_unique_norm = 'yes'
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Minimum unique words. This check prevents a new phrase          */
+/*   which simply scrambles the words of the current phrase.         */
+/*   For example, changing the phrase                                */
+/*     'Ontogeny recapitulates phylogeny'                            */
+/*   to                                                              */
+/*     'Phylogeny recapitulates ontogeny'                            */
+/*                                                                   */
+/*   An associated variable controls whether the phrases are first   */
+/*   upper-cased before the check is performed.                      */
+/*                                                                   */
+/*   Another associated variable controls the minimum word length    */
+/*   checked, so that the user does not satisfy the rule by virtue   */
+/*   of insignificant words like I, a, an, and, the, it, etc.        */
+/*                                                                   */
+/*   This check is only performed for PASSWORD and RACINIT, since    */
+/*   ADDUSER and ALTUSER do not provide the old password phrase.     */
+/*                                                                   */
+/*   This check may be enabled by changing the setting of            */
+/*   Phr_word_unique to a non-zero value.                            */
+/*                                                                   */
+Phr_word_unique = 0
+Phr_word_unique_upper = 'yes'
+Phr_word_minlen = 4
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+/*   Dictionary check. Defines a stem containing words which are not */
+/*   allowed in a new phrase. This check is case insensitive. This   */
+/*   check detects only words in the phrase (surrounded by one or    */
+/*   more blank). It will not detect the restricted word if it is a  */
+/*   substring of another word.                                      */
+/*                                                                   */
+/*   Keep in mind that there is a time limit enforced by ICHPWX11    */
+/*   on the execution of this exec.                                  */
+/*                                                                   */
+/*   This check may be enabled by setting the value of Phr_dict.0    */
+/*   to the number of words in the stem.                             */
+/*                                                                   */
+/*   Words defined in this list will be upper-cased prior to the     */
+/*   check.                                                          */
+/*                                                                   */
+Phr_dict.0  = 0        /* Change this as words are added and deleted */
+Phr_dict.1  = 'IBM'
+Phr_dict.2  = 'RACF'
+Phr_dict.3  = 'PASSWORD'
+Phr_dict.4  = 'PHRASE'
+Phr_dict.5  = 'PASSPHRASE'
+Phr_dict.6  = 'SECRET'
+Phr_dict.7  = 'IBMUSER'
+Phr_dict.8  = 'SYS1'
+/*                                                                   */
+/* ----------------------------------------------------------------- */
+/*                                                                   */
+/*                                                                   */
+/*   This ought to get you started. Now go ahead and add checks      */
+/*   which make sense for your particular installation. It sure      */
+/*   beats programming in assembler!                                 */
+/*                                                                   */
+/*********************************************************************/
+/* Exit processing starts here:                                      */
+/*                                                                   */
+/* Get the variables passed to us from ICHPWX11.                     */
+/*********************************************************************/
+parse ARG RexxRc,RexxReason,ExitCaller,CPPLaddr,CmdImage,newPhrase,  ,
+          userID,workAddr,oldPhrase,chgDate,ACEEaddr,userName,       ,
+          instData,groupName,instAddr
+
+/*********************************************************************/
+/* Initialize the return and reason code to 0                        */
+/*********************************************************************/
+RexxRc = 0
+RexxReason = 0
+
+/*********************************************************************/
+/* Set the arithmetic precision to 10 digits (from the default of 9) */
+/* so that D2X (used below) can convert larger hex addresses.        */
+/*********************************************************************/
+NUMERIC DIGITS 10
+
+/*********************************************************************/
+/* Convert numeric ExitCaller parm into a string value for later use.*/
+/*********************************************************************/
+Select
+  When ExitCaller = 1 Then
+    CallerName = "RACINIT"
+  When ExitCaller = 2 Then
+    CallerName = "PASSWORD"
+  When ExitCaller = 3 Then
+    CallerName = "ALTUSER"
+  When ExitCaller = 4 Then
+    CallerName = "ADDUSER"
+  Otherwise
+    CallerName = "INVALID"
+end
+
+/*********************************************************************/
+/* Dump arguments if debug is on.                                    */
+/*                                                                   */
+/* Note:                                                             */
+/*  - The args are dumped in the order in which they are received.   */
+/*  - The old/new phrase and the command image are not dumped, as    */
+/*    they contain sensitive data which will be logged. Uncomment    */
+/*    these lines only when testing on a test system.                */
+/*  -  has a limit of 126 characters, and will truncate        */
+/*    strings if necessary.                                          */
+/*********************************************************************/
+if debug = 'on' then do
+  AXRWTO("In IRRPHREX called by ICHPWX11. Dumping args:")
+
+  AXRWTO("Caller name is:" CallerName)
+
+  AXRWTO("CPPL address: X'"D2X(CPPLaddr)"'")
+
+  /*******************************************************************/
+  /* Remove leading, trailing, and repeated embedded spaces first,   */
+  /* just to get as much meaningful text as possible. This isn't     */
+  /* foolproof as it might compress meaningful spaces, e.g. in       */
+  /* installation data. You can break the command image into smaller */
+  /* pieces if you really want to display it all.                    */
+  /*******************************************************************/
+  If Length(CmdImage) = 0 Then
+    AXRWTO("Command image not provided.")
+  Else do
+    CmdImage = Space(CmdImage)
+    AXRWTO("Command image length:" LENGTH(CmdImage))
+    /*
+    AXRWTO("Command image:" CmdImage)
+    */
+  End
+
+  /*
+  AXRWTO("New password phrase length:" LENGTH(newPhrase))
+  AXRWTO("New password phrase:" newPhrase)
+  */
+
+  AXRWTO("User ID:" userID)
+
+  AXRWTO("Work area address: X'"D2X(workAddr)"'")
+
+  /*
+  If Length(oldPhrase) = 0 Then
+    AXRWTO("Old password phrase not provided.")
+  Else do
+    AXRWTO("Old password phrase length:" LENGTH(oldPhrase))
+    AXRWTO("Old password phrase:" oldPhrase)
+  End
+  */
+
+  If Length(chgDate) = 0 Then
+    AXRWTO("Last-change date not provided.")
+  Else
+    AXRWTO("Last-change date:" chgDate)
+
+  AXRWTO("ACEE address: X'"D2X(ACEEaddr)"'")
+
+  If Length(userName) = 0 Then
+    AXRWTO("User name not provided.")
+  Else do
+    userName = Strip(userName,trailing)
+    AXRWTO("User name:" userName)
+  End
+
+  If Length(instData) = 0 Then
+    AXRWTO("Installation data not provided.")
+  Else do
+    AXRWTO("Installation data length:" Length(instData))
+    AXRWTO("Installation data:" instData)
+  End
+
+  If Length(groupName) = 0 Then
+    AXRWTO("Group name not provided.")
+  Else
+    AXRWTO("Group name:" groupName)
+
+  AXRWTO("INSTLN= address: X'"D2X(instAddr)"'")
+
+  /*******************************************************************/
+  /* If a given WTO doesn't work, the following lines can print out  */
+  /* error information provided the variable WtoRc was used in the   */
+  /* WTO. For example:                                               */
+  /*    WtoRc = AXRWTO("text")                                       */
+  /* AXRDIAG is a built-in variable provided by System REXX.         */
+  /*******************************************************************/
+  /*
+  AXRWTO("AXRWTO rc: " WtoRc)
+  AXRWTO("AXRDIAG: " AXRDIAG)
+  */
+End /* debug on */
+/*********************************************************************/
+/* Enforce minimum length                                            */
+/*********************************************************************/
+If Phr_minlen /= 'PHR_MINLEN' &,
+   length(newPhrase) < Phr_minlen then do
+  RexxReason = 1
+  signal phrexit
+End
+
+/*********************************************************************/
+/* Enforce maximum length                                            */
+/*********************************************************************/
+If Phr_maxlen /= 'PHR_MAXLEN' &,
+   length(newPhrase) > Phr_maxlen then do
+  RexxReason = 2
+  signal phrexit
+End
+
+/*********************************************************************/
+/* Enforce allowable characters.                                     */
+/*********************************************************************/
+If Phr_allowed_chars /= 'PHR_ALLOWED_CHARS',/* If variable defined   */
+ & Length(Phr_allowed_chars) > 0 Then       /* And not null          */
+  If verify(newPhrase,Phr_allowed_chars) > 0 then do
+    RexxReason = 3
+    signal phrexit
+  End
+
+/*********************************************************************/
+/* Enforce leading blanks.                                           */
+/*********************************************************************/
+If Phr_leading_blanks = 'no' then
+  If Substr(newPhrase,1,1) = ' ' then do
+    RexxReason = 4
+    signal phrexit
+  End
+
+/*********************************************************************/
+/* Enforce trailing blanks.                                          */
+/*********************************************************************/
+If Phr_trailing_blanks = 'no' then
+  If Substr(newPhrase,Length(newPhrase),1) = ' ' then do
+    RexxReason = 5
+    signal phrexit
+  End
+
+/*********************************************************************/
+/* For subsequent checking, we will create a normalized copy of the  */
+/* phrases in which blanks are removed and the string is folded to   */
+/* upper case. The old (current) phrase is only provided for RACINIT */
+/* and PASSWORD. Note there is a case where RACINIT does not have    */
+/* the old phrase (when a PassTicket was used to authenticate).      */
+/*********************************************************************/
+NormNewPhrase = ''
+Do I = 1 to Words(newPhrase)
+  NormNewPhrase = NormNewPhrase||Word(newPhrase,I)
+End
+Upper NormNewPhrase
+
+NormOldPhrase = ''
+If Length(oldPhrase) > 0 Then do
+  Do I = 1 to Words(oldPhrase)
+    NormOldPhrase = NormOldPhrase||Word(oldPhrase,I)
+  End
+  Upper NormOldPhrase
+End
+
+/*********************************************************************/
+/* Enforce user name restriction. The user's name is not available   */
+/* on an ADDUSER command. The user name is not required in a RACF    */
+/* profile, and ICHPWX11 will have set a length length value of 0    */
+/* if there is no name. Note that the RACF user name is always in    */
+/* upper case. We are using a copy of the new phrase value which     */
+/* has been upper-cased (above).                                     */
+/*********************************************************************/
+If Phr_name_allowed = 'no' &,
+   CallerName /= 'ADDUSER' &,
+   Length(userName) > 0 Then
+  Do I = 1 to Words(userName)
+    If Pos(Word(userName,I),NormNewPhrase) /= 0 &,
+       Length(Word(userName,I)) >= Phr_name_minlen Then do
+      RexxReason = 6
+      signal phrexit
+    End
+  End
+
+/*********************************************************************/
+/* Reject trivial differences between new and old password phrase.   */
+/*********************************************************************/
+If Phr_triviality = 'yes' & Length(NormOldPhrase) > 0 Then
+  If NormOldPhrase = NormNewPhrase |,
+     Pos(NormNewPhrase,NormOldPhrase) /= 0 |,
+     Pos(NormOldPhrase,NormNewPhrase) /= 0 Then do
+    RexxReason = 7
+    signal phrexit
+  End
+
+/*********************************************************************/
+/* Enforce minimum unique characters by position, from the old       */
+/* value.                                                            */
+/*********************************************************************/
+If Phr_min_unique /= 'PHR_MIN_UNIQUE' &,      /* Variable is defined */
+   Phr_min_unique > 0                 &,      /* And greater than 0  */
+   Length(NormOldPhrase) > 0 Then do          /* And old available   */
+
+  If Phr_min_unique_norm = 'yes' Then do
+    old_string = NormOldPhrase
+    new_string = NormNewPhrase
+  End
+  Else do
+    old_string = oldPhrase
+    new_string = newPhrase
+  End
+
+  MinDiff = 0
+  Do I = 1 to Min(Length(old_string),Length(new_string))
+    If Substr(old_string,I,1) /= Substr(new_string,I,1) Then
+      MinDiff = MinDiff + 1
+  End
+
+  If MinDiff < Phr_min_unique Then do
+    RexxReason = 8
+    signal phrexit
+  End
+End
+
+/*********************************************************************/
+/* Enforce minimum unique words in the new password phrase as        */
+/* compared to the old value.                                        */
+/*********************************************************************/
+MinWords = 0
+If Phr_word_minlen = 'PHR_WORD_MINLEN' Then /* Variable not defined  */
+  Phr_word_minlen = 0                       /* All words count       */
+
+If Phr_word_unique /= 'PHR_WORD_UNIQUE' &,  /* Variable defined      */
+   Phr_word_unique > 0                  &,  /* And greater than 0    */
+   Length(OldPhrase) > 0 Then do            /* And old available     */
+
+  old_string = oldPhrase
+  new_string = newPhrase
+  If Phr_word_unique_upper = 'yes' Then do
+    Upper old_string
+    Upper new_string
+  End
+
+  Do I = 1 to Words(new_string)
+    If Length(Word(new_string,I)) >= Phr_word_minlen &,
+       Wordpos(Word(new_string,I),old_string) = 0 Then
+      MinWords = MinWords + 1
+  End
+
+  If MinWords < Phr_word_unique Then do
+    RexxReason = 9
+    signal phrexit
+  End
+End
+
+/*********************************************************************/
+/* Enforce dictionary check.                                         */
+/*********************************************************************/
+UpperNew = newPhrase
+Upper UpperNew
+If Phr_dict.0 /= 'PHR_DICT.0' &,          /* Stem defined and        */
+   Phr_dict.0 > 0 Then                    /* Count field > zero      */
+  Do I = 1 to Phr_dict.0
+    UpperWord = Phr_dict.I
+    Upper UpperWord
+    If Wordpos(UpperWord,UpperNew) > 0 Then do
+      RexxReason = 10
+      signal phrexit
+    End
+  End
+
+/*********************************************************************/
+/* Return to ICHPWX11.                                               */
+/*********************************************************************/
+phrexit:
+If RexxReason /= 0 Then
+  RexxRc = 4
+
+If debug = 'on' then do
+  AXRWTO("RexxRc =" RexxRc)
+  AXRWTO("RexxReason =" RexxReason)
+End
+
+return

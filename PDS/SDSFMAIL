@@ -1,0 +1,164 @@
+/* REXX */
+/* SDSFMAIL                                                         */
+/* 02/15/2022 - Paul Lemons - Vericast Harland Clarke               */
+/*                                                                  */
+/* this code will take any output with a destination of email       */
+/* with a form that matches a member name in the email address book */
+/* and send that output to the email addresses in that member       */
+/* address book name defaults to CLK2.L0.EMAIL.ADDR.BOOK            */
+/* If successful it will change the destination to XMAIL            */
+/*                                                                  */
+/* Default destination is EMAIL but can pass any destination        */
+trace e
+/* Change the variable pds to your address book pds  */
+pds = 'CLK2.L3.EMAIL.ADDR.BOOK'
+parse arg dest .
+if length(dest) = 0 then do
+  dest = 'EMAIL'
+end
+recpt = ''
+/* Only look at output with specific destination */
+/* Can limit by job name mask if needed */
+isfprefix = '*'
+/* Pre-work to call ISF */
+rc=isfcalls('ON')
+/* Access the ST display */
+address SDSF "ISFEXEC O"
+lrc=rc
+
+call msgrtn
+if lrc<>0 then exit 20
+
+/* Loop for all jobs with that destination */
+do ix=1 to destn.0
+  if destn.ix = dest then
+    do
+     member = forms.ix
+     dsn = space(pds '(' member ')',0)
+     available = SYSDSN("'"dsn"'")
+     if available = 'OK' then do
+        /* Issue the SA action against the row to */
+        /* allocate all data sets in the job.     */
+        ADDRESS SDSF "ISFACT O TOKEN('"TOKEN.ix"') PARM(NP SA)"
+        lrc=rc
+        call msgrtn
+        if lrc<>0 then
+          exit 20
+        /* The data set name for each allocated data    */
+        /* set is contained in the isfdsname stem.  The */
+        /* ddname returned by allocation is contained   */
+        /* in the isfddname stem.                       */
+        /* Say "Number of data sets allocated:" value(isfdsname".0") */
+        /* Read the records from each data set and list them */
+        do jx=1 to isfddname.0
+    /*    Say "Now reading" isfdsname.jx */
+         "EXECIO * DISKR" isfddname.jx "(STEM line. FINIS"
+    /*    Say "  Lines read:" line.0 */
+         do kx = 1 to line.0
+            output.kx = line.kx
+          end
+        call emailit
+      end
+    end
+  end
+end
+rc=isfcalls('OFF')
+exit
+
+/* Subroutine to list error messages */
+msgrtn: procedure expose isfmsg isfmsg2.
+/* The isfmsg variable contains a short message */
+if isfmsg<>"" then
+/*  Say "isfmsg is:" isfmsg */
+/* The isfmsg2 stem contains additional descriptive */
+/* error messages                                   */
+do ix=1 to isfmsg2.0
+/*  Say "isfmsg2."ix "is:" isfmsg2.ix */
+end
+return
+
+emailit:
+/* Read the email address book */
+/* If all goes well then send the output to SMTP */
+"alloc fi(mailbook) da('"dsn"') shr"
+"execio * diskr mailbook (stem line. finis"
+reccnt = 0
+/* set defaults */
+subject = 'test email'
+ext = 'txt'
+if line.0 > 0 then do
+  recpt = ''
+  i = 0
+  cnt = line.0
+  do until i = cnt
+    i = i + 1
+    parse var line.i info
+/*  say info */
+    select
+      when word(info,1) = 'email' then do
+        reccnt = reccnt + 1
+        recpt.reccnt = word(info,2)
+        end
+      when word(info,1) = 'subject' then do
+        subjectpos = pos(info,'subject')
+        subjectpos = subjectpos + 9
+        subject = space(substr(info,subjectpos))
+        end
+      when word(info,1) = 'ext' then do
+        ext = word(info,2)
+        end
+      otherwise
+         nop
+      end
+   end
+ end
+ if reccnt = 0 then do
+   say 'no email address found'
+   exit 12
+  end
+"free fi(mailbook)"
+sndr = 'EMS.Post.Master@harlandclarke.com'
+/* prep to send output to SMTP */
+'alloc fi(smtpout) sysout(b) writer(smtp)'
+"newstack"
+queue 'helo ' mvsvar(sysname)
+queue 'mail from:<'sndr'>'
+rcptcnt = 0
+tocnt = 0
+do until rcptcnt =  reccnt
+  rcptcnt = rcptcnt + 1
+  queue 'rcpt to:<'recpt.rcptcnt'>'
+end
+queue 'data'
+queue 'from: <'sndr'>'
+do until tocnt =  rcptcnt
+  tocnt = tocnt + 1
+  queue 'to:<'recpt.rcptcnt'>'
+end
+queue 'subject: 'subject
+queue 'mime-version: 1.0 '
+queue 'content-type: multipart/mixed; '
+queue '              boundary=  "gc0y0pkb9ex" '
+queue ' '
+queue 'this message is in mime format '
+queue '--gc0y0pkb9ex '
+/* remove parens if pds member */
+subject = translate(subject,'.','(')
+subject = translate(subject,'',')')
+subject = space(subject,0)
+queue 'content-disposition: attachment; filename="'subject'.'ext'"'
+queue 'content-type: text/html'
+queue ' <pre> <font face="fixedsys" size=1> '
+queue ' '
+do kx = 1 to line.0
+  queue output.kx
+end
+queue '.'
+queue 'quit'
+/* trace i */
+"execio * diskw smtpout (finis"
+say 'email sent by' sndr
+'free fi(smtpout)'
+/* Change the destination from email to xmail */
+address SDSF "ISFACT O TOKEN('"TOKEN.ix"') PARM(DESTN XMAIL)"
+return
